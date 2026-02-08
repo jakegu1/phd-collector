@@ -2,7 +2,8 @@
 
 import streamlit as st
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+import urllib.parse
 
 from sqlalchemy import create_engine, func
 from sqlalchemy.orm import sessionmaker
@@ -60,6 +61,7 @@ st.sidebar.title("🎓 PhD项目收集器")
 st.sidebar.markdown("---")
 
 # Manual scrape trigger
+st.sidebar.caption("💡 建议每天采集1次即可，避免频繁请求")
 if st.sidebar.button("🔄 立即采集", use_container_width=True):
     with st.spinner("正在采集数据，请稍候..."):
         collector = PhDCollector()
@@ -159,9 +161,9 @@ if date_range != "全部":
     days_map = {"今天": 0, "最近3天": 3, "最近7天": 7, "最近30天": 30}
     days = days_map.get(date_range, 0)
     if days == 0:
-        cutoff = datetime.utcnow().replace(hour=0, minute=0, second=0)
+        cutoff = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0)
     else:
-        cutoff = datetime.utcnow() - timedelta(days=days)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     filtered["collected_at"] = pd.to_datetime(filtered["collected_at"])
     filtered = filtered[filtered["collected_at"] >= cutoff]
 
@@ -175,7 +177,7 @@ col1, col2, col3, col4 = st.columns(4)
 col1.metric("📊 总项目数", len(df))
 col2.metric("🔍 筛选结果", len(filtered))
 
-today_count = len(df[pd.to_datetime(df["collected_at"]).dt.date == datetime.utcnow().date()])
+today_count = len(df[pd.to_datetime(df["collected_at"]).dt.date == datetime.now(timezone.utc).date()])
 col3.metric("📅 今日新增", today_count)
 
 source_count = df["source"].nunique()
@@ -217,13 +219,76 @@ display_df["链接"] = display_df["链接"].apply(lambda x: x if x else "")
 
 st.dataframe(
     display_df,
-    use_container_width=True,
+    width="stretch",
     height=600,
     column_config={
         "链接": st.column_config.LinkColumn("链接", display_text="查看"),
         "项目标题": st.column_config.TextColumn("项目标题", width="large"),
     },
 )
+
+# ---------------------------------------------------------------------------
+# Doubao AI Post Generator
+# ---------------------------------------------------------------------------
+st.markdown("---")
+st.subheader("🤖 AI推文生成（豆包）")
+st.caption("选择一个项目，一键生成小红书/社交媒体推文")
+
+project_titles = filtered["title"].tolist()
+if project_titles:
+    selected_title = st.selectbox("选择项目", project_titles, index=0, label_visibility="collapsed")
+    selected_row = filtered[filtered["title"] == selected_title].iloc[0]
+
+    # Show selected project info
+    with st.expander("📄 项目详情", expanded=False):
+        pcol1, pcol2 = st.columns(2)
+        pcol1.write(f"**大学:** {selected_row.get('university', 'N/A')}")
+        pcol1.write(f"**地区:** {selected_row.get('region_cn', 'N/A')} · {selected_row.get('country', 'N/A')}")
+        pcol2.write(f"**学科:** {selected_row.get('discipline', 'N/A')}")
+        pcol2.write(f"**截止时间:** {selected_row.get('deadline', 'N/A')}")
+        if selected_row.get('description'):
+            st.write(f"**简介:** {selected_row['description'][:300]}...")
+
+    project_url = selected_row.get("url", "")
+    prompt_text = (
+        f"请访问以下PhD项目链接，了解项目详情，然后模仿下面的风格撰写一篇小红书推文：\n\n"
+        f"项目链接：{project_url}\n\n"
+        f"已知信息：\n"
+        f"- 标题：{selected_row.get('title', '')}\n"
+        f"- 大学：{selected_row.get('university', '')}\n"
+        f"- 国家/地区：{selected_row.get('country', '')} ({selected_row.get('region_cn', '')})\n"
+        f"- 学科：{selected_row.get('discipline', '')}\n"
+        f"- 截止时间：{selected_row.get('deadline', '')}\n"
+        f"- 资助类型：{format_funding(selected_row.get('funding_type', ''))}\n\n"
+        f"请按以下风格撰写推文（包含emoji、分段、亮点列举）：\n"
+        f"标题格式：🇸🇪[国旗] + 大学名 + 博士项目招生更新！\n"
+        f"内容包括：学校亮点、资助待遇、热门项目一览、申请贴士、适合人群\n"
+        f"语气活泼、信息丰富，适合小红书发布。"
+    )
+
+    doubao_url = "https://www.doubao.com/chat/"
+
+    col_ai1, col_ai2, col_ai3 = st.columns([1, 1, 2])
+    with col_ai1:
+        # Copy prompt to clipboard via JS
+        copy_js = f"""
+        <button onclick="navigator.clipboard.writeText(document.getElementById('prompt-text').value).then(()=>this.innerText='✅ 已复制!')" 
+        style="background:#4F8BF9;color:white;border:none;padding:8px 20px;border-radius:6px;cursor:pointer;font-size:14px;width:100%">
+        📋 复制AI提示词</button>
+        <textarea id="prompt-text" style="position:absolute;left:-9999px">{prompt_text}</textarea>
+        """
+        st.components.v1.html(copy_js, height=45)
+    with col_ai2:
+        # Open Doubao in new tab
+        open_js = f"""
+        <a href="{doubao_url}" target="_blank" style="text-decoration:none">
+        <button style="background:#FF6B6B;color:white;border:none;padding:8px 20px;border-radius:6px;cursor:pointer;font-size:14px;width:100%">
+        🤖 打开豆包AI</button></a>
+        """
+        st.components.v1.html(open_js, height=45)
+
+    with st.expander("👀 预览提示词", expanded=False):
+        st.code(prompt_text, language=None)
 
 # ---------------------------------------------------------------------------
 # Export
@@ -242,7 +307,6 @@ with col_exp1:
     )
 
 with col_exp2:
-    # Export filtered as Excel-compatible
     st.download_button(
         label="📥 导出Excel",
         data=csv_data,

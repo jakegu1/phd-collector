@@ -72,26 +72,34 @@ class ScholarshipDbScraper(BaseScraper):
             if url and not url.startswith("http"):
                 url = self.BASE_URL + url
 
-            # Try to extract university from URL (often encoded in URL slug)
+            # Structure: <li> has multiple <div>s
+            #   div1: h4 > a (title)
+            #   div2: <a>University</a> | <a class="text-success">Region</a> | <span>time</span>
+            #   div3: <p>description</p>
+            divs = item.find_all("div", recursive=False)
+
+            # University & Country from second div
             university = ""
-            url_match = re.search(r"[-/]([A-Z][a-z]+-University[^=/]*)", url)
-            if url_match:
-                university = url_match.group(1).replace("-", " ")
-            else:
-                # Try other URL patterns like "University-of-XXX"
-                url_match = re.search(r"(University[- ]of[- ][A-Za-z-]+)", url.replace("-", " "))
-                if url_match:
-                    university = url_match.group(1)
-
-            # Description: any <p> or <small> text in the listing
-            desc_el = item.select_one("p") or item.select_one("small")
-            description = desc_el.get_text(strip=True)[:2000] if desc_el else ""
-
-            # Country: try to extract from the listing text or nearby elements
             country = ""
-            country_el = item.select_one("span.country") or item.select_one("small.text-muted")
-            if country_el:
-                country = country_el.get_text(strip=True)
+            if len(divs) >= 2:
+                meta_div = divs[1]
+                # University: first <a> (links to ?em=University-Name)
+                uni_link = meta_div.find("a")
+                if uni_link:
+                    university = uni_link.get_text(strip=True)
+                # Country/Region: <a class="text-success">
+                country_link = meta_div.select_one("a.text-success")
+                if country_link:
+                    country = country_link.get_text(strip=True)
+
+            # Description from third div
+            description = ""
+            desc_el = item.select_one("p") or item.select_one("small")
+            if desc_el:
+                description = desc_el.get_text(strip=True)[:2000]
+
+            # Try to extract discipline from description keywords
+            discipline = self._detect_discipline(f"{title} {description}")
 
             full_text = f"{title} {description}"
             funding_type = self.detect_funding_type(full_text)
@@ -105,7 +113,7 @@ class ScholarshipDbScraper(BaseScraper):
                 "region_cn": self.get_region_cn(region),
                 "country": country,
                 "funding_type": funding_type,
-                "discipline": "",
+                "discipline": discipline,
                 "deadline": "",
                 "description": description,
                 "url": url,
@@ -114,3 +122,26 @@ class ScholarshipDbScraper(BaseScraper):
         except Exception as e:
             logger.error(f"[ScholarshipDb] Error parsing listing: {e}")
             return {}
+
+    @staticmethod
+    def _detect_discipline(text: str) -> str:
+        """Try to detect discipline from text using keyword matching."""
+        text_lower = text.lower()
+        disciplines = {
+            "Computer Science": ["computer science", "machine learning", "artificial intelligence", "deep learning", "software", "data science", "computing", "informatics"],
+            "Engineering": ["engineering", "mechanical", "electrical", "civil", "chemical engineering", "robotics"],
+            "Biology": ["biology", "biolog", "genomic", "molecular", "cell biology", "ecology", "neuroscience", "biomedical"],
+            "Physics": ["physics", "quantum", "astrophysics", "particle", "optics", "photonic"],
+            "Chemistry": ["chemistry", "chemical", "catalysis", "polymer", "organic chemistry"],
+            "Mathematics": ["mathematics", "mathematical", "statistics", "probability", "algebra"],
+            "Medicine": ["medicine", "medical", "clinical", "cancer", "oncology", "cardiology", "pharma", "health"],
+            "Environmental Science": ["environment", "climate", "sustainability", "ecology", "marine", "ocean"],
+            "Social Sciences": ["social", "sociology", "psychology", "political", "economics", "education", "law", "policy"],
+            "Business": ["business", "management", "marketing", "finance", "accounting", "entrepreneurship"],
+            "Arts & Humanities": ["history", "philosophy", "literature", "linguistics", "cultural", "arts"],
+        }
+        found = []
+        for disc, keywords in disciplines.items():
+            if any(kw in text_lower for kw in keywords):
+                found.append(disc)
+        return ", ".join(found[:2]) if found else ""
