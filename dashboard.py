@@ -3,6 +3,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta, timezone
+import html as html_mod
 import urllib.parse
 
 from sqlalchemy import create_engine, func
@@ -217,78 +218,94 @@ display_df["收集时间"] = pd.to_datetime(display_df["收集时间"]).dt.strft
 # Make URL clickable
 display_df["链接"] = display_df["链接"].apply(lambda x: x if x else "")
 
-st.dataframe(
+event = st.dataframe(
     display_df,
-    width="stretch",
     height=600,
     column_config={
         "链接": st.column_config.LinkColumn("链接", display_text="查看"),
-        "项目标题": st.column_config.TextColumn("项目标题", width="large"),
+        "项目标题": st.column_config.TextColumn("项目标题"),
     },
+    on_select="rerun",
+    selection_mode="single-row",
 )
 
 # ---------------------------------------------------------------------------
-# Doubao AI Post Generator
+# Doubao AI - triggered by row selection
 # ---------------------------------------------------------------------------
-st.markdown("---")
-st.subheader("🤖 AI推文生成（豆包）")
-st.caption("选择一个项目，一键生成小红书/社交媒体推文")
+selected_rows = event.selection.rows if event.selection else []
 
-project_titles = filtered["title"].tolist()
-if project_titles:
-    selected_title = st.selectbox("选择项目", project_titles, index=0, label_visibility="collapsed")
-    selected_row = filtered[filtered["title"] == selected_title].iloc[0]
+if selected_rows:
+    row_idx = selected_rows[0]
+    sel = filtered.iloc[row_idx]
 
-    # Show selected project info
-    with st.expander("📄 项目详情", expanded=False):
-        pcol1, pcol2 = st.columns(2)
-        pcol1.write(f"**大学:** {selected_row.get('university', 'N/A')}")
-        pcol1.write(f"**地区:** {selected_row.get('region_cn', 'N/A')} · {selected_row.get('country', 'N/A')}")
-        pcol2.write(f"**学科:** {selected_row.get('discipline', 'N/A')}")
-        pcol2.write(f"**截止时间:** {selected_row.get('deadline', 'N/A')}")
-        if selected_row.get('description'):
-            st.write(f"**简介:** {selected_row['description'][:300]}...")
+    st.markdown("---")
+    st.subheader(f"🤖 为「{sel.get('title', '')[:40]}...」生成推文")
 
-    project_url = selected_row.get("url", "")
-    prompt_text = (
+    # Project summary
+    pcol1, pcol2, pcol3 = st.columns(3)
+    pcol1.write(f"**大学:** {sel.get('university', 'N/A')}")
+    pcol1.write(f"**地区:** {sel.get('region_cn', 'N/A')} · {sel.get('country', 'N/A')}")
+    pcol2.write(f"**学科:** {sel.get('discipline', 'N/A')}")
+    pcol2.write(f"**截止时间:** {sel.get('deadline', 'N/A')}")
+    pcol3.write(f"**资助类型:** {format_funding(sel.get('funding_type', ''))}")
+    pcol3.write(f"**来源:** {sel.get('source', 'N/A')}")
+
+    project_url = sel.get("url", "")
+    default_prompt = (
         f"请访问以下PhD项目链接，了解项目详情，然后模仿下面的风格撰写一篇小红书推文：\n\n"
         f"项目链接：{project_url}\n\n"
         f"已知信息：\n"
-        f"- 标题：{selected_row.get('title', '')}\n"
-        f"- 大学：{selected_row.get('university', '')}\n"
-        f"- 国家/地区：{selected_row.get('country', '')} ({selected_row.get('region_cn', '')})\n"
-        f"- 学科：{selected_row.get('discipline', '')}\n"
-        f"- 截止时间：{selected_row.get('deadline', '')}\n"
-        f"- 资助类型：{format_funding(selected_row.get('funding_type', ''))}\n\n"
+        f"- 标题：{sel.get('title', '')}\n"
+        f"- 大学：{sel.get('university', '')}\n"
+        f"- 国家/地区：{sel.get('country', '')} ({sel.get('region_cn', '')})\n"
+        f"- 学科：{sel.get('discipline', '')}\n"
+        f"- 截止时间：{sel.get('deadline', '')}\n"
+        f"- 资助类型：{format_funding(sel.get('funding_type', ''))}\n\n"
         f"请按以下风格撰写推文（包含emoji、分段、亮点列举）：\n"
         f"标题格式：🇸🇪[国旗] + 大学名 + 博士项目招生更新！\n"
         f"内容包括：学校亮点、资助待遇、热门项目一览、申请贴士、适合人群\n"
         f"语气活泼、信息丰富，适合小红书发布。"
     )
 
+    # Editable prompt
+    prompt_text = st.text_area(
+        "✏️ 编辑提示词（可自由修改后再复制）",
+        value=default_prompt,
+        height=200,
+        key=f"prompt_{row_idx}",
+    )
+
+    # Single combined button: copy prompt + open Doubao
     doubao_url = "https://www.doubao.com/chat/"
-
-    col_ai1, col_ai2, col_ai3 = st.columns([1, 1, 2])
-    with col_ai1:
-        # Copy prompt to clipboard via JS
-        copy_js = f"""
-        <button onclick="navigator.clipboard.writeText(document.getElementById('prompt-text').value).then(()=>this.innerText='✅ 已复制!')" 
-        style="background:#4F8BF9;color:white;border:none;padding:8px 20px;border-radius:6px;cursor:pointer;font-size:14px;width:100%">
-        📋 复制AI提示词</button>
-        <textarea id="prompt-text" style="position:absolute;left:-9999px">{prompt_text}</textarea>
-        """
-        st.components.v1.html(copy_js, height=45)
-    with col_ai2:
-        # Open Doubao in new tab
-        open_js = f"""
-        <a href="{doubao_url}" target="_blank" style="text-decoration:none">
-        <button style="background:#FF6B6B;color:white;border:none;padding:8px 20px;border-radius:6px;cursor:pointer;font-size:14px;width:100%">
-        🤖 打开豆包AI</button></a>
-        """
-        st.components.v1.html(open_js, height=45)
-
-    with st.expander("👀 预览提示词", expanded=False):
-        st.code(prompt_text, language=None)
+    safe_prompt = html_mod.escape(prompt_text)
+    combined_js = f"""
+    <button onclick="
+        navigator.clipboard.writeText(document.getElementById('prompt-data').value)
+            .then(function() {{
+                window.open('{doubao_url}', '_blank');
+                var el = document.getElementById('status-msg');
+                el.innerText = '\u2705 \u63d0\u793a\u8bcd\u5df2\u590d\u5236\uff01\u8c46\u5305AI\u5df2\u5728\u65b0\u6807\u7b7e\u9875\u6253\u5f00\uff0c\u8bf7\u7c98\u8d34\u63d0\u793a\u8bcd';
+                el.style.display = 'block';
+            }})
+            .catch(function() {{
+                var el = document.getElementById('status-msg');
+                el.innerText = '\u274c \u590d\u5236\u5931\u8d25\uff0c\u8bf7\u624b\u52a8\u590d\u5236\u4e0b\u65b9\u63d0\u793a\u8bcd';
+                el.style.display = 'block';
+            }});
+    " style="background:linear-gradient(135deg,#4F8BF9,#FF6B6B);color:white;border:none;
+             padding:12px 32px;border-radius:8px;cursor:pointer;font-size:16px;font-weight:bold;
+             box-shadow:0 2px 8px rgba(0,0,0,0.15);transition:transform 0.1s"
+    onmouseover="this.style.transform='scale(1.02)'"
+    onmouseout="this.style.transform='scale(1)'">
+    \ud83d\udccb\ud83e\udd16 \u590d\u5236\u63d0\u793a\u8bcd\u5e76\u6253\u5f00\u8c46\u5305AI
+    </button>
+    <textarea id="prompt-data" style="position:absolute;left:-9999px">{safe_prompt}</textarea>
+    <div id="status-msg" style="display:none;margin-top:8px;padding:8px 12px;
+         background:#f0f9f0;border-radius:6px;color:#2e7d32;font-size:14px"></div>
+    """
+    st.components.v1.html(combined_js, height=90)
+else:
+    st.info("👆 点击表格中的任意一行，即可生成AI推文")
 
 # ---------------------------------------------------------------------------
 # Export
