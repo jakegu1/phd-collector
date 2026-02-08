@@ -5,6 +5,11 @@ import pandas as pd
 from datetime import datetime, timedelta, timezone
 import html as html_mod
 import urllib.parse
+import re
+
+def _clean_text(s: str) -> str:
+    """Remove surrogate characters that break protobuf/UTF-8 encoding."""
+    return s.encode("utf-8", errors="replace").decode("utf-8")
 
 from sqlalchemy import create_engine, func
 from sqlalchemy.orm import sessionmaker
@@ -277,29 +282,29 @@ if selected_rows:
 
     # Single combined button: copy prompt + open Doubao
     doubao_url = "https://www.doubao.com/chat/"
-    safe_prompt = html_mod.escape(prompt_text)
-    combined_js = f"""
+    safe_prompt = html_mod.escape(_clean_text(prompt_text))
+    combined_js = """
     <button onclick="
         navigator.clipboard.writeText(document.getElementById('prompt-data').value)
-            .then(function() {{
-                window.open('{doubao_url}', '_blank');
+            .then(function() {
+                window.open('""" + doubao_url + """', '_blank');
                 var el = document.getElementById('status-msg');
-                el.innerText = '\u2705 \u63d0\u793a\u8bcd\u5df2\u590d\u5236\uff01\u8c46\u5305AI\u5df2\u5728\u65b0\u6807\u7b7e\u9875\u6253\u5f00\uff0c\u8bf7\u7c98\u8d34\u63d0\u793a\u8bcd';
+                el.innerText = 'Done! Prompt copied. Doubao opened in new tab.';
                 el.style.display = 'block';
-            }})
-            .catch(function() {{
+            })
+            .catch(function() {
                 var el = document.getElementById('status-msg');
-                el.innerText = '\u274c \u590d\u5236\u5931\u8d25\uff0c\u8bf7\u624b\u52a8\u590d\u5236\u4e0b\u65b9\u63d0\u793a\u8bcd';
+                el.innerText = 'Copy failed. Please copy the prompt manually.';
                 el.style.display = 'block';
-            }});
+            });
     " style="background:linear-gradient(135deg,#4F8BF9,#FF6B6B);color:white;border:none;
              padding:12px 32px;border-radius:8px;cursor:pointer;font-size:16px;font-weight:bold;
              box-shadow:0 2px 8px rgba(0,0,0,0.15);transition:transform 0.1s"
     onmouseover="this.style.transform='scale(1.02)'"
     onmouseout="this.style.transform='scale(1)'">
-    \ud83d\udccb\ud83e\udd16 \u590d\u5236\u63d0\u793a\u8bcd\u5e76\u6253\u5f00\u8c46\u5305AI
+    Copy Prompt + Open Doubao AI
     </button>
-    <textarea id="prompt-data" style="position:absolute;left:-9999px">{safe_prompt}</textarea>
+    <textarea id="prompt-data" style="position:absolute;left:-9999px">""" + safe_prompt + """</textarea>
     <div id="status-msg" style="display:none;margin-top:8px;padding:8px 12px;
          background:#f0f9f0;border-radius:6px;color:#2e7d32;font-size:14px"></div>
     """
