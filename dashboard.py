@@ -10,7 +10,7 @@ import re
 from sqlalchemy import create_engine, func, delete
 from sqlalchemy.orm import sessionmaker
 
-from models import PhDProject, Bookmark, init_db
+from models import PhDProject, Bookmark, Base, init_db
 from config import DB_URL
 from collector import PhDCollector
 
@@ -43,6 +43,7 @@ def _parse_deadline_urgency(deadline_str: str) -> str:
 
 def _load_bookmarks(engine) -> set:
     """Load bookmarked project IDs from DB."""
+    Base.metadata.create_all(engine, tables=[Bookmark.__table__], checkfirst=True)
     Session = sessionmaker(bind=engine)
     session = Session()
     try:
