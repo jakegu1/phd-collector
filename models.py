@@ -44,6 +44,15 @@ class PhDProject(Base):
         return f"<PhDProject(title='{self.title[:50]}', region='{self.region_cn}')>"
 
 
+class Bookmark(Base):
+    """Bookmarked / favorited project IDs."""
+    __tablename__ = "bookmarks"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    project_id = Column(Integer, nullable=False, unique=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 def init_db():
     """Initialize database and create tables."""
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)

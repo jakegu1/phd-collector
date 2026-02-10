@@ -7,16 +7,67 @@ import html as html_mod
 import urllib.parse
 import re
 
+from sqlalchemy import create_engine, func, delete
+from sqlalchemy.orm import sessionmaker
+
+from models import PhDProject, Bookmark, init_db
+from config import DB_URL
+from collector import PhDCollector
+
+
 def _clean_text(s: str) -> str:
     """Remove surrogate characters that break protobuf/UTF-8 encoding."""
     return s.encode("utf-8", errors="replace").decode("utf-8")
 
-from sqlalchemy import create_engine, func
-from sqlalchemy.orm import sessionmaker
 
-from models import PhDProject, init_db
-from config import DB_URL
-from collector import PhDCollector
+def _parse_deadline_urgency(deadline_str: str) -> str:
+    """Parse deadline string and return urgency label."""
+    if not deadline_str or deadline_str == "nan" or pd.isna(deadline_str):
+        return ""
+    try:
+        clean = re.sub(r"\s*\(.*?\)", "", str(deadline_str)).strip()
+        clean = re.sub(r"\s*-\s*\d{1,2}:\d{2}$", "", clean).strip()
+        dt = pd.to_datetime(clean, dayfirst=True, format="mixed")
+        days = (dt - pd.Timestamp.now()).days
+        if days < 0:
+            return "Expired"
+        elif days <= 7:
+            return f"!! {days}d"
+        elif days <= 30:
+            return f"! {days}d"
+        else:
+            return f"{days}d"
+    except Exception:
+        return ""
+
+
+def _load_bookmarks(engine) -> set:
+    """Load bookmarked project IDs from DB."""
+    Session = sessionmaker(bind=engine)
+    session = Session()
+    try:
+        ids = {b.project_id for b in session.query(Bookmark).all()}
+        return ids
+    finally:
+        session.close()
+
+
+def _toggle_bookmark(engine, project_id: int) -> bool:
+    """Toggle bookmark for a project. Returns new bookmark state."""
+    Session = sessionmaker(bind=engine)
+    session = Session()
+    try:
+        existing = session.query(Bookmark).filter_by(project_id=project_id).first()
+        if existing:
+            session.delete(existing)
+            session.commit()
+            return False
+        else:
+            session.add(Bookmark(project_id=project_id))
+            session.commit()
+            return True
+    finally:
+        session.close()
 
 # ---------------------------------------------------------------------------
 # Page config
@@ -110,8 +161,22 @@ def _doubao_button_html(prompt_text: str) -> str:
 @st.dialog("AI推文生成", width="large")
 def show_ai_dialog(row_dict: dict):
     """Modal dialog for generating a Doubao AI social media post."""
-    st.markdown(f"### {row_dict.get('title', '')}")
+    project_id = row_dict.get("id", 0)
 
+    # Title + bookmark toggle
+    tcol1, tcol2 = st.columns([5, 1])
+    tcol1.markdown(f"### {row_dict.get('title', '')}")
+
+    # Bookmark toggle
+    engine = get_engine()
+    current_bookmarks = _load_bookmarks(engine)
+    is_bookmarked = project_id in current_bookmarks
+    bookmark_label = "Unfavorite" if is_bookmarked else "Favorite"
+    if tcol2.button(bookmark_label, use_container_width=True):
+        _toggle_bookmark(engine, project_id)
+        st.rerun()
+
+    # Project info
     pcol1, pcol2 = st.columns(2)
     pcol1.write(f"**大学:** {row_dict.get('university', 'N/A')}")
     pcol1.write(f"**地区:** {row_dict.get('region_cn', 'N/A')} - {row_dict.get('country', 'N/A')}")
@@ -119,6 +184,15 @@ def show_ai_dialog(row_dict: dict):
     pcol2.write(f"**学科:** {row_dict.get('discipline', 'N/A')}")
     pcol2.write(f"**截止时间:** {row_dict.get('deadline', 'N/A')}")
     pcol2.write(f"**来源:** {row_dict.get('source', 'N/A')}")
+
+    urgency = _parse_deadline_urgency(row_dict.get("deadline", ""))
+    if urgency:
+        if urgency == "Expired":
+            st.error(f"Deadline: {urgency}")
+        elif urgency.startswith("!!"):
+            st.warning(f"Deadline: {urgency} - Apply ASAP!")
+        elif urgency.startswith("!"):
+            st.info(f"Deadline: {urgency}")
 
     if row_dict.get('url'):
         st.markdown(f"[>> 查看原始项目页面]({row_dict['url']})")
@@ -201,6 +275,10 @@ search_query = st.sidebar.text_input("🔍 关键词搜索", placeholder="输入
 # Date range
 date_range = st.sidebar.selectbox("时间范围", ["全部", "今天", "最近3天", "最近7天", "最近30天"])
 
+# Bookmark filter
+st.sidebar.markdown("---")
+show_bookmarks_only = st.sidebar.toggle("⭐ 只看收藏", value=False)
+
 # ---------------------------------------------------------------------------
 # Apply filters
 # ---------------------------------------------------------------------------
@@ -250,12 +328,19 @@ if date_range != "全部":
     filtered = filtered[filtered["collected_at"] >= cutoff]
 
 # ---------------------------------------------------------------------------
+# Apply bookmark filter
+# ---------------------------------------------------------------------------
+bookmarked_ids = _load_bookmarks(engine)
+if show_bookmarks_only:
+    filtered = filtered[filtered["id"].isin(bookmarked_ids)]
+
+# ---------------------------------------------------------------------------
 # Main content
 # ---------------------------------------------------------------------------
 st.title("🎓 PhD项目收集器")
 
 # Stats row
-col1, col2, col3, col4 = st.columns(4)
+col1, col2, col3, col4, col5 = st.columns(5)
 col1.metric("📊 总项目数", len(df))
 col2.metric("🔍 筛选结果", len(filtered))
 
@@ -264,46 +349,71 @@ col3.metric("📅 今日新增", today_count)
 
 source_count = df["source"].nunique()
 col4.metric("🌐 数据源", source_count)
+col5.metric("⭐ 已收藏", len(bookmarked_ids))
 
 st.markdown("---")
 
-# Region distribution chart
-st.subheader("📊 地区分布")
-col_chart1, col_chart2 = st.columns(2)
+# Charts row: region + funding + collection history
+st.subheader("📊 数据概览")
+col_chart1, col_chart2, col_chart3 = st.columns(3)
 
 with col_chart1:
+    st.caption("地区分布")
     region_counts = filtered["region_cn"].value_counts()
     st.bar_chart(region_counts)
 
 with col_chart2:
+    st.caption("资助类型")
     funding_display = filtered["funding_type"].apply(format_funding)
     funding_counts = funding_display.value_counts()
     st.bar_chart(funding_counts)
+
+with col_chart3:
+    st.caption("采集历史（每日新增）")
+    history = df.copy()
+    history["date"] = pd.to_datetime(history["collected_at"]).dt.date
+    daily_counts = history.groupby("date").size().reset_index(name="count")
+    daily_counts["date"] = pd.to_datetime(daily_counts["date"])
+    daily_counts = daily_counts.set_index("date").sort_index()
+    st.line_chart(daily_counts["count"])
 
 st.markdown("---")
 
 # Project table
 st.subheader(f"📋 项目列表 ({len(filtered)} 条)")
+st.caption("✅ 点击左侧复选框选中项目 → 弹出 AI 推文生成 + 收藏功能")
 
 display_df = filtered[
-    ["title", "university", "supervisor", "region_cn", "country", "funding_type", "discipline", "deadline", "source", "url", "collected_at"]
+    ["id", "title", "university", "supervisor", "region_cn", "country", "funding_type", "discipline", "deadline", "source", "url", "collected_at"]
 ].copy()
 
+# Urgency column
+display_df["紧迫度"] = display_df["deadline"].apply(_parse_deadline_urgency)
+
+# Bookmark star column
+display_df["收藏"] = display_df["id"].apply(lambda x: "Y" if x in bookmarked_ids else "")
+
+# Reorder: star + urgency first, then rest
+display_df = display_df[[
+    "收藏", "紧迫度", "title", "university", "supervisor", "region_cn", "country",
+    "funding_type", "discipline", "deadline", "source", "url", "collected_at", "id"
+]]
+
 display_df.columns = [
-    "项目标题", "大学", "导师", "地区", "国家", "资助类型", "学科", "截止时间", "来源", "链接", "收集时间"
+    "⭐", "紧迫度", "项目标题", "大学", "导师", "地区", "国家", "资助类型", "学科", "截止时间", "来源", "链接", "收集时间", "_id"
 ]
 
 display_df["资助类型"] = display_df["资助类型"].apply(format_funding)
 display_df["收集时间"] = pd.to_datetime(display_df["收集时间"]).dt.strftime("%Y-%m-%d %H:%M")
-
-# Make URL clickable
 display_df["链接"] = display_df["链接"].apply(lambda x: x if x else "")
 
+# Hide _id column from display
 event = st.dataframe(
     display_df,
     height=600,
     column_config={
         "链接": st.column_config.LinkColumn("链接", display_text="查看"),
+        "_id": None,
     },
     on_select="rerun",
     selection_mode="single-row",
@@ -318,6 +428,7 @@ if selected_rows:
     row_idx = selected_rows[0]
     sel = filtered.iloc[row_idx]
     row_dict = {
+        "id": int(sel.get("id", 0)),
         "title": str(sel.get("title", "")),
         "university": str(sel.get("university", "")),
         "country": str(sel.get("country", "")),
@@ -330,8 +441,6 @@ if selected_rows:
         "description": str(sel.get("description", "")),
     }
     show_ai_dialog(row_dict)
-else:
-    st.caption("Tip: click any row above to generate an AI social media post")
 
 # ---------------------------------------------------------------------------
 # Export
