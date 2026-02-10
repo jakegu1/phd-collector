@@ -1,4 +1,4 @@
-"""Database models for PhD projects."""
+"""Database models for PhD projects and bookmarks."""
 
 import os
 from datetime import datetime

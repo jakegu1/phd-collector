@@ -21,7 +21,7 @@ def _clean_text(s: str) -> str:
 
 
 def _parse_deadline_urgency(deadline_str: str) -> str:
-    """Parse deadline string and return urgency label."""
+    """Parse deadline string and return urgency label with color indicator."""
     if not deadline_str or deadline_str == "nan" or pd.isna(deadline_str):
         return ""
     try:
@@ -30,13 +30,13 @@ def _parse_deadline_urgency(deadline_str: str) -> str:
         dt = pd.to_datetime(clean, dayfirst=True, format="mixed")
         days = (dt - pd.Timestamp.now()).days
         if days < 0:
-            return "Expired"
+            return "\u26ab Expired"
         elif days <= 7:
-            return f"!! {days}d"
+            return f"\U0001f534 {days}d"
         elif days <= 30:
-            return f"! {days}d"
+            return f"\U0001f7e1 {days}d"
         else:
-            return f"{days}d"
+            return f"\U0001f7e2 {days}d"
     except Exception:
         return ""
 
@@ -391,7 +391,7 @@ display_df = filtered[
 display_df["紧迫度"] = display_df["deadline"].apply(_parse_deadline_urgency)
 
 # Bookmark star column
-display_df["收藏"] = display_df["id"].apply(lambda x: "Y" if x in bookmarked_ids else "")
+display_df["收藏"] = display_df["id"].apply(lambda x: "\u2b50" if x in bookmarked_ids else "")
 
 # Reorder: star + urgency first, then rest
 display_df = display_df[[
