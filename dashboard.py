@@ -60,6 +60,82 @@ def format_funding(val: str) -> str:
     return " / ".join(parts)
 
 
+def _build_prompt(sel) -> str:
+    """Build the default AI prompt for a project row."""
+    project_url = sel.get("url", "")
+    return (
+        f"请访问以下PhD项目链接，了解项目详情，然后模仿下面的风格撰写一篇小红书推文：\n\n"
+        f"项目链接：{project_url}\n\n"
+        f"已知信息：\n"
+        f"- 标题：{sel.get('title', '')}\n"
+        f"- 大学：{sel.get('university', '')}\n"
+        f"- 国家/地区：{sel.get('country', '')} ({sel.get('region_cn', '')})\n"
+        f"- 学科：{sel.get('discipline', '')}\n"
+        f"- 截止时间：{sel.get('deadline', '')}\n"
+        f"- 资助类型：{format_funding(sel.get('funding_type', ''))}\n\n"
+        f"请按以下风格撰写推文（包含emoji、分段、亮点列举）：\n"
+        f"标题格式：[对应国家国旗emoji] + 大学名 + 博士项目招生更新！\n"
+        f"内容包括：学校亮点、资助待遇、热门项目一览、申请贴士、适合人群\n"
+        f"语气活泼、信息丰富，适合小红书发布。"
+    )
+
+
+def _doubao_button_html(prompt_text: str) -> str:
+    """Return pure-ASCII HTML for the copy+open button."""
+    doubao_url = "https://www.doubao.com/chat/"
+    safe = html_mod.escape(_clean_text(prompt_text))
+    return (
+        '<button onclick="'
+        "navigator.clipboard.writeText(document.getElementById('prompt-data').value)"
+        ".then(function(){" + "window.open('" + doubao_url + "','_blank');"
+        "var el=document.getElementById('status-msg');"
+        "el.innerText='Done! Prompt copied. Doubao opened in new tab.';"
+        "el.style.display='block';})"
+        ".catch(function(){"
+        "var el=document.getElementById('status-msg');"
+        "el.innerText='Copy failed. Please copy the prompt manually.';"
+        "el.style.display='block';});"
+        '" style="background:linear-gradient(135deg,#4F8BF9,#FF6B6B);color:white;border:none;'
+        'padding:12px 32px;border-radius:8px;cursor:pointer;font-size:16px;font-weight:bold;'
+        'box-shadow:0 2px 8px rgba(0,0,0,0.15);width:100%">'
+        'Copy Prompt + Open Doubao AI</button>'
+        '<textarea id="prompt-data" style="position:absolute;left:-9999px">'
+        + safe +
+        '</textarea>'
+        '<div id="status-msg" style="display:none;margin-top:8px;padding:8px 12px;'
+        'background:#f0f9f0;border-radius:6px;color:#2e7d32;font-size:14px"></div>'
+    )
+
+
+@st.dialog("AI推文生成", width="large")
+def show_ai_dialog(row_dict: dict):
+    """Modal dialog for generating a Doubao AI social media post."""
+    st.markdown(f"### {row_dict.get('title', '')}")
+
+    pcol1, pcol2 = st.columns(2)
+    pcol1.write(f"**大学:** {row_dict.get('university', 'N/A')}")
+    pcol1.write(f"**地区:** {row_dict.get('region_cn', 'N/A')} - {row_dict.get('country', 'N/A')}")
+    pcol1.write(f"**资助类型:** {format_funding(row_dict.get('funding_type', ''))}")
+    pcol2.write(f"**学科:** {row_dict.get('discipline', 'N/A')}")
+    pcol2.write(f"**截止时间:** {row_dict.get('deadline', 'N/A')}")
+    pcol2.write(f"**来源:** {row_dict.get('source', 'N/A')}")
+
+    if row_dict.get('url'):
+        st.markdown(f"[>> 查看原始项目页面]({row_dict['url']})")
+
+    st.markdown("---")
+
+    default_prompt = _build_prompt(row_dict)
+    prompt_text = st.text_area(
+        "Edit prompt (editable before copying)",
+        value=default_prompt,
+        height=200,
+    )
+
+    btn_html = _doubao_button_html(prompt_text)
+    st.components.v1.html(btn_html, height=80)
+
+
 # ---------------------------------------------------------------------------
 # Sidebar
 # ---------------------------------------------------------------------------
@@ -228,89 +304,34 @@ event = st.dataframe(
     height=600,
     column_config={
         "链接": st.column_config.LinkColumn("链接", display_text="查看"),
-        "项目标题": st.column_config.TextColumn("项目标题"),
     },
     on_select="rerun",
     selection_mode="single-row",
 )
 
 # ---------------------------------------------------------------------------
-# Doubao AI - triggered by row selection
+# Doubao AI - triggered by row selection -> opens dialog
 # ---------------------------------------------------------------------------
 selected_rows = event.selection.rows if event.selection else []
 
 if selected_rows:
     row_idx = selected_rows[0]
     sel = filtered.iloc[row_idx]
-
-    st.markdown("---")
-    st.subheader(f"🤖 为「{sel.get('title', '')[:40]}...」生成推文")
-
-    # Project summary
-    pcol1, pcol2, pcol3 = st.columns(3)
-    pcol1.write(f"**大学:** {sel.get('university', 'N/A')}")
-    pcol1.write(f"**地区:** {sel.get('region_cn', 'N/A')} · {sel.get('country', 'N/A')}")
-    pcol2.write(f"**学科:** {sel.get('discipline', 'N/A')}")
-    pcol2.write(f"**截止时间:** {sel.get('deadline', 'N/A')}")
-    pcol3.write(f"**资助类型:** {format_funding(sel.get('funding_type', ''))}")
-    pcol3.write(f"**来源:** {sel.get('source', 'N/A')}")
-
-    project_url = sel.get("url", "")
-    default_prompt = (
-        f"请访问以下PhD项目链接，了解项目详情，然后模仿下面的风格撰写一篇小红书推文：\n\n"
-        f"项目链接：{project_url}\n\n"
-        f"已知信息：\n"
-        f"- 标题：{sel.get('title', '')}\n"
-        f"- 大学：{sel.get('university', '')}\n"
-        f"- 国家/地区：{sel.get('country', '')} ({sel.get('region_cn', '')})\n"
-        f"- 学科：{sel.get('discipline', '')}\n"
-        f"- 截止时间：{sel.get('deadline', '')}\n"
-        f"- 资助类型：{format_funding(sel.get('funding_type', ''))}\n\n"
-        f"请按以下风格撰写推文（包含emoji、分段、亮点列举）：\n"
-        f"标题格式：[对应国家国旗emoji] + 大学名 + 博士项目招生更新！\n"
-        f"内容包括：学校亮点、资助待遇、热门项目一览、申请贴士、适合人群\n"
-        f"语气活泼、信息丰富，适合小红书发布。"
-    )
-
-    # Editable prompt
-    prompt_text = st.text_area(
-        "✏️ 编辑提示词（可自由修改后再复制）",
-        value=default_prompt,
-        height=200,
-        key=f"prompt_{row_idx}",
-    )
-
-    # Single combined button: copy prompt + open Doubao
-    doubao_url = "https://www.doubao.com/chat/"
-    safe_prompt = html_mod.escape(_clean_text(prompt_text))
-    combined_js = """
-    <button onclick="
-        navigator.clipboard.writeText(document.getElementById('prompt-data').value)
-            .then(function() {
-                window.open('""" + doubao_url + """', '_blank');
-                var el = document.getElementById('status-msg');
-                el.innerText = 'Done! Prompt copied. Doubao opened in new tab.';
-                el.style.display = 'block';
-            })
-            .catch(function() {
-                var el = document.getElementById('status-msg');
-                el.innerText = 'Copy failed. Please copy the prompt manually.';
-                el.style.display = 'block';
-            });
-    " style="background:linear-gradient(135deg,#4F8BF9,#FF6B6B);color:white;border:none;
-             padding:12px 32px;border-radius:8px;cursor:pointer;font-size:16px;font-weight:bold;
-             box-shadow:0 2px 8px rgba(0,0,0,0.15);transition:transform 0.1s"
-    onmouseover="this.style.transform='scale(1.02)'"
-    onmouseout="this.style.transform='scale(1)'">
-    Copy Prompt + Open Doubao AI
-    </button>
-    <textarea id="prompt-data" style="position:absolute;left:-9999px">""" + safe_prompt + """</textarea>
-    <div id="status-msg" style="display:none;margin-top:8px;padding:8px 12px;
-         background:#f0f9f0;border-radius:6px;color:#2e7d32;font-size:14px"></div>
-    """
-    st.components.v1.html(combined_js, height=90)
+    row_dict = {
+        "title": str(sel.get("title", "")),
+        "university": str(sel.get("university", "")),
+        "country": str(sel.get("country", "")),
+        "region_cn": str(sel.get("region_cn", "")),
+        "discipline": str(sel.get("discipline", "")),
+        "deadline": str(sel.get("deadline", "")),
+        "funding_type": str(sel.get("funding_type", "")),
+        "source": str(sel.get("source", "")),
+        "url": str(sel.get("url", "")),
+        "description": str(sel.get("description", "")),
+    }
+    show_ai_dialog(row_dict)
 else:
-    st.info("👆 点击表格中的任意一行，即可生成AI推文")
+    st.caption("Tip: click any row above to generate an AI social media post")
 
 # ---------------------------------------------------------------------------
 # Export
