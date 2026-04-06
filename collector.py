@@ -1,13 +1,13 @@
 """Main collector engine - orchestrates scraping, cleaning, and storage."""
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict
 
 from sqlalchemy.exc import IntegrityError
 
 from models import PhDProject, get_session, init_db
-from scrapers import EuraxessScraper, ScholarshipDbScraper
+from scrapers import EuraxessScraper, ScholarshipDbScraper, FindAPhDScraper, AcademicsDeScraper
 
 logger = logging.getLogger(__name__)
 
@@ -18,8 +18,10 @@ class PhDCollector:
     def __init__(self):
         init_db()
         self.scrapers = [
+            FindAPhDScraper(),
             EuraxessScraper(),
             ScholarshipDbScraper(),
+            AcademicsDeScraper(),
         ]
 
     def run(self) -> Dict:
@@ -86,7 +88,7 @@ class PhDCollector:
                             setattr(existing, field, new_val)
                             changed = True
                     if changed:
-                        existing.updated_at = datetime.utcnow()
+                        existing.updated_at = datetime.now(timezone.utc)
                     dupes += 1
                     continue
 
@@ -105,7 +107,7 @@ class PhDCollector:
                     url=p.get("url", ""),
                     source=p.get("source", ""),
                     is_new=True,
-                    collected_at=datetime.utcnow(),
+                    collected_at=datetime.now(timezone.utc),
                 )
                 session.add(project)
                 saved += 1

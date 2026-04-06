@@ -6,14 +6,17 @@
 
 ## 功能
 
-- **多源采集**: EURAXESS, ScholarshipDb（FindAPhD待接入）
-- **三大地区**: 欧陆、澳洲、北美
+- **四大数据源**: FindAPhD, EURAXESS, ScholarshipDb, academics.de
+- **三大地区**: 欧陆（15+国家）、澳洲、北美
 - **智能分类**: 自动识别全奖/CSC/Rolling/岗位制
 - **字段提取**: 国家、大学、学科、截止时间、导师
+- **截止日期提醒**: 🔴 ≤7天 🟡 ≤30天 🟢 >30天 ⚫ 已过期
+- **项目收藏**: ⭐ 标记感兴趣的项目，侧栏一键筛选
+- **采集历史**: 每日新增项目趋势图
 - **Web仪表盘**: 基于Streamlit的可视化界面
-- **🤖 AI推文生成**: 一键生成小红书风格推文（集成豆包AI）
+- **🤖 AI推文生成**: 弹窗式一键生成小红书风格推文（集成豆包AI）
 - **定时任务**: 每日自动采集（默认早8点）
-- **数据导出**: 支持CSV/Excel导出
+- **数据导出**: 支持CSV/真Excel(.xlsx)导出
 - **去重机制**: 基于URL自动去重，增量更新
 
 ## 在线使用（推荐）
@@ -22,9 +25,9 @@
 
 ### 豆包AI推文生成
 
-1. 在仪表盘底部「AI推文生成」区域选择一个PhD项目
-2. 点击「📋 复制AI提示词」
-3. 点击「🤖 打开豆包AI」
+1. 在项目列表中勾选左侧复选框选中一个PhD项目
+2. 弹窗自动弹出，显示项目详情和可编辑的AI提示词
+3. 点击「Copy Prompt + Open Doubao AI」一键复制并打开豆包
 4. 在豆包对话框中粘贴提示词，即可生成小红书风格推文
 
 ## 本地运行
@@ -71,9 +74,10 @@ phd/
 └── scrapers/
     ├── __init__.py
     ├── base.py          # 爬虫基类
-    ├── findaphd.py      # FindAPhD爬虫（暂未启用）
-    ├── euraxess.py      # EURAXESS爬虫
-    └── scholarshipdb.py # ScholarshipDb爬虫
+    ├── findaphd.py      # FindAPhD爬虫（cloudscraper绕过Cloudflare）
+    ├── euraxess.py      # EURAXESS爬虫（8页）
+    ├── scholarshipdb.py # ScholarshipDb爬虫（15+欧洲国家）
+    └── academics_de.py  # academics.de爬虫（德国学术岗位）
 ```
 
 ## 配置
@@ -84,14 +88,16 @@ phd/
 - `MAX_PAGES`: 每个数据源的最大翻页数
 - `REQUEST_DELAY`: 请求间隔（秒）
 - `FUNDING_KEYWORDS`: 资助类型关键词
+- `SCHOLARSHIPDB_URLS`: ScholarshipDb的国家/地区URL列表
 
 ## 数据源
 
 | 数据源 | 状态 | 覆盖地区 | 提取字段 | 说明 |
 |--------|------|---------|----------|------|
-| EURAXESS | ✅ 已启用 | 欧洲 | 国家、大学、学科、截止时间 | 欧盟官方研究人员门户 |
-| ScholarshipDb | ✅ 已启用 | 全球 | 大学、地区、学科（关键词推断） | 奖学金数据库 |
-| FindAPhD | ⏸️ 待接入 | 全球 | - | Cloudflare防护，待后续接入 |
+| FindAPhD | ✅ 已启用 | 欧洲/澳洲/北美 | 大学、国家、学科、截止时间、导师 | 最大PhD聚合平台（cloudscraper绕过CF） |
+| EURAXESS | ✅ 已启用 | 欧洲 | 国家、大学、学科、截止时间 | 欧盟官方研究人员门户，8页深度 |
+| ScholarshipDb | ✅ 已启用 | 全球（15+欧洲国家） | 大学、地区、学科 | 覆盖德/荷/瑞/英/法/丹/挪/芬/奥/比/西/意/爱尔兰等 |
+| academics.de | ✅ 已启用 | 德国 | 大学、城市、截止时间、学科 | 德国最大学术招聘平台 |
 
 ## 注意事项
 

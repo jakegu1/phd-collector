@@ -1,7 +1,7 @@
 """Database models for PhD projects and bookmarks."""
 
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import (
     Column,
@@ -17,6 +17,17 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 from config import DB_URL, DB_PATH
 
 Base = declarative_base()
+
+_engine = None
+
+
+def _get_engine():
+    """Return a module-level singleton engine."""
+    global _engine
+    if _engine is None:
+        os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+        _engine = create_engine(DB_URL)
+    return _engine
 
 
 class PhDProject(Base):
@@ -37,8 +48,8 @@ class PhDProject(Base):
     url = Column(String(1000), unique=True, nullable=False)
     source = Column(String(100))  # findaphd / euraxess / scholarshipdb
     is_new = Column(Boolean, default=True)
-    collected_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    collected_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     def __repr__(self):
         return f"<PhDProject(title='{self.title[:50]}', region='{self.region_cn}')>"
@@ -50,19 +61,18 @@ class Bookmark(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     project_id = Column(Integer, nullable=False, unique=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 def init_db():
     """Initialize database and create tables."""
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    engine = create_engine(DB_URL)
+    engine = _get_engine()
     Base.metadata.create_all(engine)
     return engine
 
 
 def get_session():
     """Get a new database session."""
-    engine = create_engine(DB_URL)
+    engine = _get_engine()
     Session = sessionmaker(bind=engine)
     return Session()

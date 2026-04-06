@@ -2,20 +2,44 @@
 
 import logging
 import re
-from typing import List, Dict
+from typing import List, Dict, Optional
+
+import cloudscraper
+from bs4 import BeautifulSoup
 
 from scrapers.base import BaseScraper
-from config import FINDAPHD_URLS
+from config import FINDAPHD_URLS, REQUEST_TIMEOUT, REQUEST_DELAY
+
+import time
 
 logger = logging.getLogger(__name__)
 
 
 class FindAPhDScraper(BaseScraper):
-    """Scrape PhD listings from FindAPhD.com."""
+    """Scrape PhD listings from FindAPhD.com using cloudscraper for Cloudflare bypass."""
 
     SOURCE_NAME = "findaphd"
     BASE_URL = "https://www.findaphd.com"
     MAX_PAGES = 5  # Per region, ~15 results per page
+
+    def __init__(self):
+        super().__init__()
+        self._cs = cloudscraper.create_scraper(
+            browser={"browser": "chrome", "platform": "windows", "desktop": True}
+        )
+
+    def fetch_page(self, url: str) -> Optional[BeautifulSoup]:
+        """Override base to use cloudscraper for Cloudflare bypass."""
+        try:
+            time.sleep(REQUEST_DELAY)
+            resp = self._cs.get(url, timeout=REQUEST_TIMEOUT)
+            if resp.status_code != 200:
+                logger.warning(f"[FindAPhD] HTTP {resp.status_code} for {url}")
+                return None
+            return BeautifulSoup(resp.text, "lxml")
+        except Exception as e:
+            logger.error(f"[FindAPhD] Fetch error for {url}: {e}")
+            return None
 
     def scrape(self) -> List[Dict]:
         """Scrape all configured regions."""

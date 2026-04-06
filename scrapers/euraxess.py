@@ -20,7 +20,7 @@ class EuraxessScraper(BaseScraper):
 
     SOURCE_NAME = "euraxess"
     BASE_URL = "https://euraxess.ec.europa.eu"
-    MAX_PAGES = 3
+    MAX_PAGES = 8
 
     def scrape(self) -> List[Dict]:
         """Scrape EURAXESS R1 (PhD) positions."""

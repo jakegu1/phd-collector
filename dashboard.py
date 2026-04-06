@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 import html as html_mod
 import urllib.parse
 import re
+import io
 
 from sqlalchemy import create_engine, func, delete
 from sqlalchemy.orm import sessionmaker
@@ -188,11 +189,11 @@ def show_ai_dialog(row_dict: dict):
 
     urgency = _parse_deadline_urgency(row_dict.get("deadline", ""))
     if urgency:
-        if urgency == "Expired":
+        if "Expired" in urgency:
             st.error(f"Deadline: {urgency}")
-        elif urgency.startswith("!!"):
+        elif "\U0001f534" in urgency:
             st.warning(f"Deadline: {urgency} - Apply ASAP!")
-        elif urgency.startswith("!"):
+        elif "\U0001f7e1" in urgency:
             st.info(f"Deadline: {urgency}")
 
     if row_dict.get('url'):
@@ -460,11 +461,14 @@ with col_exp1:
     )
 
 with col_exp2:
+    xlsx_buffer = io.BytesIO()
+    display_df.to_excel(xlsx_buffer, index=False, engine="openpyxl")
+    xlsx_buffer.seek(0)
     st.download_button(
         label="📥 导出Excel",
-        data=csv_data,
+        data=xlsx_buffer.getvalue(),
         file_name=f"phd_projects_{datetime.now().strftime('%Y%m%d')}.xlsx",
-        mime="application/vnd.ms-excel",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True,
     )
 
@@ -473,7 +477,7 @@ with col_exp2:
 # ---------------------------------------------------------------------------
 st.markdown("---")
 st.caption(
-    f"数据来源: EURAXESS, ScholarshipDb | "
+    f"数据来源: FindAPhD, EURAXESS, ScholarshipDb, academics.de | "
     f"最后更新: {df['collected_at'].max() if not df.empty else 'N/A'} | "
     f"数据库总量: {len(df)} 条"
 )
