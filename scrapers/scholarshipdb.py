@@ -98,6 +98,12 @@ class ScholarshipDbScraper(BaseScraper):
             if desc_el:
                 description = desc_el.get_text(strip=True)[:2000]
 
+            # Extract deadline from full listing text
+            # ScholarshipDb embeds deadlines like "Application Deadline\n10 May 2026 - 23:55 (Europe/Berlin)"
+            # or "Application Deadline 4 May 2026 - 23:59 ..."
+            full_listing_text = item.get_text(" ", strip=True)
+            deadline = self._extract_deadline(full_listing_text)
+
             # Try to extract discipline from description keywords
             discipline = self._detect_discipline(f"{title} {description}")
 
@@ -114,7 +120,7 @@ class ScholarshipDbScraper(BaseScraper):
                 "country": country,
                 "funding_type": funding_type,
                 "discipline": discipline,
-                "deadline": "",
+                "deadline": deadline,
                 "description": description,
                 "url": url,
                 "source": self.SOURCE_NAME,
@@ -122,6 +128,33 @@ class ScholarshipDbScraper(BaseScraper):
         except Exception as e:
             logger.error(f"[ScholarshipDb] Error parsing listing: {e}")
             return {}
+
+    @staticmethod
+    def _extract_deadline(text: str) -> str:
+        """Extract application deadline from listing text.
+
+        Looks for patterns like:
+          'Application Deadline 10 May 2026 - 23:55 (Europe/Berlin)'
+          'Application Deadline 4 May 2026'
+          'Deadline: 15 June 2026'
+        """
+        # Pattern: "Application Deadline" followed by a date
+        m = re.search(
+            r"Application\s+Deadline\s*:?\s*(\d{1,2}\s+\w+\s+\d{4}(?:\s*-\s*\d{2}:\d{2})?)",
+            text,
+            re.IGNORECASE,
+        )
+        if m:
+            return m.group(1).strip()
+        # Fallback: "Deadline: <date>" or "Deadline <date>"
+        m = re.search(
+            r"Deadline\s*:?\s*(\d{1,2}\s+\w+\s+\d{4})",
+            text,
+            re.IGNORECASE,
+        )
+        if m:
+            return m.group(1).strip()
+        return ""
 
     @staticmethod
     def _detect_discipline(text: str) -> str:

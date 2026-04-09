@@ -241,10 +241,26 @@ st.sidebar.subheader("筛选条件")
 engine = get_engine()
 df = load_projects(engine)
 
-if df.empty:
+def _needs_refresh(dataframe: pd.DataFrame, hours: int = 24) -> bool:
+    """Check if the most recent collection is older than `hours` hours."""
+    if dataframe.empty:
+        return True
+    try:
+        latest = pd.to_datetime(dataframe["collected_at"]).max()
+        if pd.isna(latest):
+            return True
+        age = datetime.now() - latest.replace(tzinfo=None)
+        return age > timedelta(hours=hours)
+    except Exception:
+        return True
+
+if df.empty or _needs_refresh(df):
     st.title("🎓 PhD项目收集器")
-    st.info("数据库为空，正在自动采集数据，请稍候...")
-    with st.spinner("首次访问，正在从 EURAXESS / ScholarshipDb 采集PhD项目..."):
+    if df.empty:
+        st.info("数据库为空，正在自动采集数据，请稍候...")
+    else:
+        st.info("数据已超过24小时未更新，正在自动采集最新项目...")
+    with st.spinner("正在从 FindAPhD / EURAXESS / ScholarshipDb / academics.de 采集PhD项目..."):
         collector = PhDCollector()
         stats = collector.run()
     st.success(
